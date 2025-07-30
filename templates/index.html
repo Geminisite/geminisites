@@ -1,0 +1,20 @@
+{% extends "layout.html" %}
+
+{% block title %}Новый чат{% endblock %}
+
+{% block content %}
+<div class="form-container">
+    <h1>Начать новый диалог</h1>
+    <p>Задайте системные инструкции для модели и напишите свое первое сообщение.</p>
+    
+    <form action="{{ url_for('new_chat') }}" method="post" class="new-chat-form">
+        <label for="system_prompt">Системный промпт (инструкция для модели):</label>
+        <textarea name="system_prompt" id="system_prompt" rows="4" placeholder="Например: Ты — Шекспир. Отвечай в стиле его сонетов.">Ты — дружелюбный и полезный ассистент.</textarea>
+        
+        <label for="first_message">Ваше первое сообщение:</label>
+        <textarea name="first_message" id="first_message" rows="4" placeholder="Напишите что-нибудь..." required></textarea>
+        
+        <button type="submit">Начать чат</button>
+    </form>
+</div>
+{% endblock %}

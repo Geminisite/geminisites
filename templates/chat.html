@@ -1,0 +1,168 @@
+{% extends "layout.html" %}
+{% block title %}Чат: {{ chat.title }}{% endblock %}
+{% block content %}
+<div class="chat-container">
+    <div class="chat-header">
+        <div class="chat-header-title">
+            <h2>{{ chat.title }}</h2>
+            <form action="{{ url_for('delete_chat', chat_id=chat.id) }}" method="post" class="delete-form-header">
+                <button type="submit" class="delete-btn-header" title="Удалить этот чат" onclick="return confirm('Вы уверены, что хотите удалить этот чат навсегда?');">
+                    Удалить чат
+                </button>
+            </form>
+        </div>
+        <details class="system-prompt-details">
+            <summary>Показать системный промпт</summary>
+            <div class="system-prompt-content">
+                <p>{{ chat.system_prompt or 'Системный промпт по умолчанию.' }}</p>
+            </div>
+        </details>
+    </div>
+    <div class="chat-window" id="chat-window">
+        {% for message in messages %}
+            <div class="message {{ 'user-message' if message.role == 'user' else 'gemini-message' }}">
+                <strong>{{ 'Вы' if message.role == 'user' else 'Gemini' }}:</strong>
+                <div class="message-content">
+                    {% if message.role == 'user' %}<pre>{{ message.content }}</pre>{% else %}{{ message.content | safe }}{% endif %}
+                </div>
+            </div>
+        {% endfor %}
+    </div>
+    <div class="input-area">
+        <form id="chat-form">
+            <input type="text" id="user-input" name="user_input" placeholder="Введите ваше сообщение..." required autocomplete="off">
+            <button type="submit" id="send-button">Отправить</button>
+        </form>
+    </div>
+</div>
+<script>
+    function processFinalContent(container) {
+        container.querySelectorAll('.gemini-message .message-content').forEach(contentDiv => {
+            const rawMarkdown = contentDiv.textContent || contentDiv.innerText || "";
+            const dirtyHtml = marked.parse(rawMarkdown);
+            contentDiv.innerHTML = DOMPurify.sanitize(dirtyHtml);
+            contentDiv.querySelectorAll('pre code').forEach(block => hljs.highlightElement(block));
+            enhanceCodeBlocks(contentDiv);
+        });
+    }
+    function enhanceCodeBlocks(container) {
+        container.querySelectorAll('pre').forEach(pre => {
+            if (pre.parentNode.classList.contains('code-block-wrapper')) return;
+            const code = pre.querySelector('code');
+            if (!code) return;
+            const wrapper = document.createElement('div');
+            wrapper.className = 'code-block-wrapper';
+            const header = document.createElement('div');
+            header.className = 'code-block-header';
+            let language = 'code';
+            const languageClass = Array.from(code.classList).find(cls => cls.startsWith('language-'));
+            if (languageClass) language = languageClass.replace('language-', '');
+            const langName = document.createElement('span');
+            langName.className = 'language-name';
+            langName.textContent = language;
+            const copyButton = document.createElement('button');
+            copyButton.className = 'copy-code-btn';
+            copyButton.textContent = 'Копировать';
+            copyButton.addEventListener('click', () => {
+                navigator.clipboard.writeText(code.innerText).then(() => {
+                    copyButton.textContent = 'Скопировано!';
+                    copyButton.classList.add('copied');
+                    setTimeout(() => { copyButton.textContent = 'Копировать'; copyButton.classList.remove('copied'); }, 2000);
+                });
+            });
+            header.appendChild(langName);
+            header.appendChild(copyButton);
+            wrapper.appendChild(header);
+            pre.parentNode.insertBefore(wrapper, pre);
+            wrapper.appendChild(pre);
+        });
+    }
+    window.addEventListener('load', function() {
+        if (typeof marked === 'undefined' || typeof DOMPurify === 'undefined' || typeof hljs === 'undefined') {
+            console.error("Критическая ошибка: одна или несколько внешних библиотек не загрузились.");
+            return;
+        }
+        processFinalContent(document.body);
+        const chatWindow = document.getElementById('chat-window');
+        const chatForm = document.getElementById('chat-form');
+        const userInput = document.getElementById('user-input');
+        const sendButton = document.getElementById('send-button');
+        chatWindow.scrollTop = chatWindow.scrollHeight;
+        chatForm.addEventListener('submit', function(event) {
+            event.preventDefault();
+            const userMessageText = userInput.value.trim();
+            if (!userMessageText) return;
+            appendUserMessage('Вы', userMessageText, 'user-message');
+            userInput.value = '';
+            sendButton.disabled = true;
+            const geminiMessageContainer = createMessageContainer('Gemini', 'gemini-message');
+            const geminiContentDiv = geminiMessageContainer.querySelector('.message-content');
+            chatWindow.appendChild(geminiMessageContainer);
+            let fullResponseText = '';
+            const bodyData = new URLSearchParams();
+            bodyData.append('user_input', userMessageText);
+            fetch(`/stream_chat/{{ chat.id }}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: bodyData
+            }).then(response => {
+                if (!response.ok) throw new Error(`Сетевая ошибка: ${response.status} ${response.statusText}`);
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                function read() {
+                    reader.read().then(({ done, value }) => {
+                        if (done) {
+                            processFinalContent(geminiMessageContainer);
+                            sendButton.disabled = false;
+                            userInput.focus();
+                            return;
+                        }
+                        const chunkText = decoder.decode(value);
+                        chunkText.split('\n').forEach(line => {
+                            if (line.startsWith('data:')) {
+                                try {
+                                    const data = JSON.parse(line.substring(5).trim());
+                                    if (data.text) {
+                                        fullResponseText += data.text;
+                                        geminiContentDiv.textContent = fullResponseText;
+                                        chatWindow.scrollTop = chatWindow.scrollHeight;
+                                    } else if (data.error) {
+                                        geminiContentDiv.textContent = `ОШИБКА: ${data.error}`;
+                                        geminiContentDiv.style.color = 'red';
+                                    }
+                                } catch (e) { console.error("Ошибка парсинга JSON:", e); }
+                            }
+                        });
+                        read();
+                    });
+                }
+                read();
+            }).catch(error => {
+                console.error("Критическая ошибка fetch:", error);
+                geminiContentDiv.textContent = `Произошла ошибка: ${error.message}.`;
+                geminiContentDiv.style.color = 'red';
+                sendButton.disabled = false;
+            });
+        });
+        function createMessageContainer(author, className) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${className}`;
+            const strong = document.createElement('strong');
+            strong.textContent = `${author}:`;
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'message-content';
+            messageDiv.appendChild(strong);
+            messageDiv.appendChild(contentDiv);
+            return messageDiv;
+        }
+        function appendUserMessage(author, text, className) {
+            const messageContainer = createMessageContainer(author, className);
+            const pre = document.createElement('pre');
+            pre.textContent = text;
+            messageContainer.querySelector('.message-content').appendChild(pre);
+            chatWindow.appendChild(messageContainer);
+            chatWindow.scrollTop = chatWindow.scrollHeight;
+        }
+    });
+</script>
+{% endblock %}

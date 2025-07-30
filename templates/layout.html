@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Чат с Gemini{% endblock %}</title>
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
+</head>
+<body>
+    <div class="main-container">
+        <aside class="sidebar">
+            <h2>Чаты</h2>
+            <a href="{{ url_for('index') }}" class="new-chat-link">+ Создать новый чат</a>
+            <nav class="chat-list">
+                {% for chat_item in all_chats %}
+                    <div class="chat-link-container">
+                        <a href="{{ url_for('chat', chat_id=chat_item.id) }}"
+                           class="chat-link {% if request.path == url_for('chat', chat_id=chat_item.id) %}active{% endif %}">
+                            {{ chat_item.title }}
+                        </a>
+                        <form action="{{ url_for('delete_chat', chat_id=chat_item.id) }}" method="post" class="delete-form">
+                            <button type="submit" class="delete-btn" title="Удалить чат"
+                                    onclick="return confirm('Вы уверены, что хотите удалить этот чат навсегда?');">
+                                
+                            </button>
+                        </form>
+                    </div>
+                {% else %}
+                    <p class="no-chats">Пока нет чатов.</p>
+                {% endfor %}
+            </nav>
+        </aside>
+        <main class="content">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="flash-message flash-{{ category }}">{{ message }}</div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+</body>
+</html>
